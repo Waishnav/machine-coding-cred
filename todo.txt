@@ -1,0 +1,2 @@
+1. need to check if _find_folder method works for finding the folder with same name but located at different levels
+2. 
