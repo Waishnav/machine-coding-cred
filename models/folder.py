@@ -23,6 +23,3 @@ class Folder(FileSystemItem):
             if item.get_name == name:
                 return item
         return None
-
-    def is_folder(self) -> bool:
-        return True

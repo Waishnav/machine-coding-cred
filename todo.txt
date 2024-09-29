@@ -1,2 +1,5 @@
 1. need to check if _find_folder method works for finding the folder with same name but located at different levels
-2. 
+2. refactoring with design patterns
+3. implementing the renaming of the folder
+4. implementing the write read permissions of users
+5. can we use different data structure to store the folder/files in FileSystem

@@ -1,70 +1,70 @@
-from typing import Deque
+from typing import Deque, Optional
+from models.file_system_item import FileSystemItem
 from service.file_system_manager import FileSystemManager
 from models.folder import Folder
 from models.file import File
 from collections import deque
 
 class FileSystemManagerImpl(FileSystemManager):
-
     def __init__(self, root_name):
         self.root = Folder(root_name)
 
-    def _find_folder(self, folder_name: str) -> Folder:
+    def _find_folder(self, folder_name: str) -> Optional[Folder]:
         if self.root.get_name == folder_name:
             return self.root
         return self._find_folder_recursively(self.root, folder_name)
 
-    def _find_folder_recursively(self, current_folder: Folder, folder_name: str) -> Folder:
+    def _find_folder_recursively(self, current_folder: Folder, folder_name: str) -> Optional[Folder]:
         found_item = current_folder.get_item(folder_name)
-        if found_item and found_item.is_folder():
+        if found_item and isinstance(found_item, Folder):
             return found_item
 
         for item in current_folder.get_items:
-            if item.is_folder():
+            if isinstance(item, Folder):
                 found_folder = self._find_folder_recursively(item, folder_name)
                 if found_folder:
                     return found_folder
         return None
 
-    def _find_match_file_recursively(self, current_folder: Folder, pattern: str) -> list:
-        folders :Deque[Folder] = deque()
+    def _find_match_file_recursively(self, current_folder: Folder, pattern: str) -> list[str]:
+        folders: Deque[Folder] = deque()
         folders.append(current_folder)
-        matched_items = []
+        matched_items: list[str] = []
         while folders:
             folder = folders.popleft()
             for item in folder.get_items:
-                if not item.is_folder() and pattern.lower() in item.get_name.lower():
+                if not isinstance(item, Folder) and pattern.lower() in item.get_name.lower():
                     matched_items.append(item.get_name)
-                if item.is_folder():
+                if isinstance(item, Folder):
                     folders.append(item)
 
         return matched_items
 
-    def _find_exact_file_recursively(self, current_folder: Folder, searched_file: str) -> str:
-        folders :Deque[Folder] = deque()
+    def _find_exact_file_recursively(self, current_folder: Folder, searched_file: str) -> Optional[FileSystemItem]:
+        folders: Deque[Folder] = deque()
         folders.append(current_folder)
         while folders:
             folder = folders.popleft()
             for item in folder.get_items:
-                if not item.is_folder() and searched_file == item.get_name:
+                if not isinstance(item, Folder) and searched_file == item.get_name:
                     return item
-                if item.is_folder():
+                if isinstance(item, Folder):
                     folders.append(item)
         return None
 
-    def _find_parent_folder_recursively(self, current_folder, name):
-        folders = deque()
+    def _find_parent_folder_and_file_item_recursively(self, current_folder: Folder, name: str) -> tuple[Optional[Folder], Optional[FileSystemItem]]:
+        folders: Deque[Folder] = deque()
         folders.append(current_folder)
         while folders:
             folder = folders.popleft()
             for item in folder.get_items:
                 if item.get_name == name:
                     return (folder, item)
-                if item.is_folder():
+                if isinstance(item, Folder):
                     folders.append(item)
         return (None, None)
 
-    def _list_directory(self, folder, level):
+    def _list_directory(self, folder: Folder, level: int) -> list:
         result = []
         if level == 0:
             result.append("+ " + folder.get_name)
@@ -73,7 +73,7 @@ class FileSystemManagerImpl(FileSystemManager):
             result.append(indent + "+ " + folder.get_name)
 
         for item in folder.get_items:
-            if item.is_folder():
+            if isinstance(item, Folder):
                 result.extend(self._list_directory(item, level + 2))
             else:
                 file_indent = " "*(level +2)
@@ -109,8 +109,8 @@ class FileSystemManagerImpl(FileSystemManager):
         """
         final_folder = self._find_folder(destination_folder)
         if final_folder:
-            parent_of_source, source_item = self._find_parent_folder_recursively(self.root, source_name)
-            if parent_of_source:
+            parent_of_source, source_item = self._find_parent_folder_and_file_item_recursively(self.root, source_name)
+            if parent_of_source and source_item:
                 parent_of_source.remove_item(source_item)
                 final_folder.add_item(source_item)
                 return True
@@ -139,7 +139,7 @@ class FileSystemManagerImpl(FileSystemManager):
         """
         return self._list_directory(self.root, 0) 
 
-    def search_file_exact_match(self, folder_name: str, file_name: str) -> str :
+    def search_file_exact_match(self, folder_name: str, file_name: str) -> Optional[str]:
         """
         Searches for an exact file match within a specific folder.
 
@@ -150,7 +150,8 @@ class FileSystemManagerImpl(FileSystemManager):
         curr_folder = self._find_folder(folder_name)
         if curr_folder:
             item = self._find_exact_file_recursively(curr_folder, file_name)
-            return item.get_name
+            if item:
+                return item.get_name
         return None
 
     def search_file_like_match(self, folder_name: str, pattern: str) -> list:

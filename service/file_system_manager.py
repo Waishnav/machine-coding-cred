@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Optional
 
 class FileSystemManager(ABC):
 
@@ -45,7 +46,7 @@ class FileSystemManager(ABC):
         pass
 
     @abstractmethod
-    def search_file_exact_match(self, folder_name: str, file_name: str) -> str:
+    def search_file_exact_match(self, folder_name: str, file_name: str) -> Optional[str]:
         """
         Searches for an exact file match within a specific folder.
 
