@@ -1,6 +1,9 @@
+import threading
+import time
+import random
 import unittest
 import logging
-import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from service.file_system_manager_imp import FileSystemManagerImpl
 
@@ -22,15 +25,7 @@ class LoggingTestRunner(unittest.TextTestRunner):
     def _makeResult(self):
         return LoggingTestResult(self.stream, self.descriptions, self.verbosity)
 
-
-
-
-
-
-
-
 class FileSystemManagerTest(unittest.TestCase):
-
     # Adding a file to an existing folder
     def test_adding_file_to_existing_folder(self):
         file_system_manager = FileSystemManagerImpl("root")
@@ -234,42 +229,157 @@ class FileSystemManagerTest(unittest.TestCase):
         self.assertIn("File2.TXT", like_match_results)
         self.assertNotIn("FOLDER2", like_match_results)
 
-
-    def test_concurrent_folder_access(self):
+    def test_concurrent_readers(self):
+        """Test multiple threads reading simultaneously"""
+        # Setup initial structure
         file_system_manager = FileSystemManagerImpl("root")
-        file_system_manager.add_file_or_folder("root", "folder1", True)
-        
-        def list_contents():
-            file_system_manager.list_contents("folder1")
-        
+        file_system_manager.add_file_or_folder("root", "test_file.txt", False)
+
+        def reader_task():
+            for _ in range(10):
+                contents = file_system_manager.list_contents("root")
+                self.assertIn("test_file.txt", contents)
+                time.sleep(0.01)  # Small delay to increase chance of thread overlap
+
+        # Create and start multiple reader threads
         threads = []
-        for _ in range(50):
-            thread = threading.Thread(target=list_contents)
+        for _ in range(10):
+            thread = threading.Thread(target=reader_task)
             threads.append(thread)
             thread.start()
-        
+
+        # Wait for all threads to complete
         for thread in threads:
             thread.join()
-        
-        self.assertTrue(True)
 
-    def test_concurrent_add_operations(self):
+    def test_concurrent_writers(self):
+        """Test multiple threads writing to different locations"""
+        results = []
         file_system_manager = FileSystemManagerImpl("root")
-        
-        def add_file(index):
-            file_system_manager.add_file_or_folder("root", f"file{index}.txt", False)
-        
+
+        def writer_task(folder_name):
+            file_system_manager.add_file_or_folder("root", folder_name, True)
+            file_system_manager.add_file_or_folder(folder_name, "file.txt", False)
+            results.append(folder_name)
+
+        # Create and start multiple writer threads
         threads = []
-        for i in range(100):
-            thread = threading.Thread(target=add_file, args=(i,))
+        for i in range(10):
+            folder_name = f"folder_{i}"
+            thread = threading.Thread(target=writer_task, args=(folder_name,))
             threads.append(thread)
             thread.start()
-        
+
+        # Wait for all threads to complete
         for thread in threads:
             thread.join()
-        
+
+        # Verify results
         contents = file_system_manager.list_contents("root")
-        self.assertEqual(len(contents), 100)
+        for folder_name in results:
+            self.assertIn(folder_name, contents)
+            folder_contents = file_system_manager.list_contents(folder_name)
+            self.assertIn("file.txt", folder_contents)
+
+    def test_readers_writers_conflict(self):
+        """Test concurrent readers and writers"""
+        stop_flag = threading.Event()
+        file_system_manager = FileSystemManagerImpl("root")
+
+        def reader_task():
+            while not stop_flag.is_set():
+                contents = file_system_manager.list_contents("root")
+                time.sleep(0.01)
+
+        def writer_task():
+            for i in range(5):
+                file_name = f"file_{i}.txt"
+                file_system_manager.add_file_or_folder("root", file_name, False)
+                time.sleep(0.02)
+
+        # Start multiple reader threads
+        reader_threads = []
+        for _ in range(5):
+            thread = threading.Thread(target=reader_task)
+            thread.daemon = True  # Make thread daemon so it exits when main thread exits
+            reader_threads.append(thread)
+            thread.start()
+
+        # Start multiple writer threads
+        writer_threads = []
+        for _ in range(3):
+            thread = threading.Thread(target=writer_task)
+            writer_threads.append(thread)
+            thread.start()
+
+        # Wait for writers to complete
+        for thread in writer_threads:
+            thread.join()
+
+        # Signal readers to stop and wait for them
+        stop_flag.set()
+        for thread in reader_threads:
+            thread.join(timeout=1.0)
+
+        # Verify final state
+        contents = file_system_manager.list_contents("root")
+        for i in range(5):
+            self.assertIn(f"file_{i}.txt", contents)
+
+    def test_concurrent_moves(self):
+        """Test concurrent move operations"""
+        file_system_manager = FileSystemManagerImpl("root")
+        # Setup initial structure
+        for i in range(5):
+            file_system_manager.add_file_or_folder("root", f"source_folder_{i}", True)
+            file_system_manager.add_file_or_folder("root", f"dest_folder_{i}", True)
+            file_system_manager.add_file_or_folder(f"source_folder_{i}", f"file_{i}.txt", False)
+
+        def move_task(index):
+            source = f"file_{index}.txt"
+            dest = f"dest_folder_{index}"
+            file_system_manager.move_file_or_folder(source, dest)
+
+        # Create and start multiple move threads
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(move_task, i) for i in range(5)]
+            # Wait for all moves to complete
+            for future in as_completed(futures):
+                future.result()
+
+        # Verify final state
+        for i in range(5):
+            source_contents = file_system_manager.list_contents(f"source_folder_{i}")
+            dest_contents = file_system_manager.list_contents(f"dest_folder_{i}")
+            self.assertNotIn(f"file_{i}.txt", source_contents)
+            self.assertIn(f"file_{i}.txt", dest_contents)
+
+    def test_stress_test(self):
+        """Stress test with multiple concurrent operations"""
+        file_system_manager = FileSystemManagerImpl("root")
+        def random_operation():
+            op = random.randint(0, 2)
+            if op == 0:  # Read operation
+                file_system_manager.list_contents("root")
+            elif op == 1:  # Write operation
+                file_name = f"file_{random.randint(0, 1000)}.txt"
+                file_system_manager.add_file_or_folder("root", file_name, False)
+            else:  # Move operation
+                contents = file_system_manager.list_contents("root")
+                if contents:
+                    file_to_move = random.choice(contents)
+                    file_system_manager.move_file_or_folder(file_to_move, "root")
+
+        # Create and start multiple threads performing random operations
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = [executor.submit(random_operation) for _ in range(100)]
+            # Wait for all operations to complete
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    self.fail(f"Stress test failed with error: {str(e)}")
+
 
 if __name__ == "__main__":
     logger.info("Starting unit tests")
